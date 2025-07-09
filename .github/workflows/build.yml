@@ -1,0 +1,56 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        runtimeIdentifier: ['win-x86', 'win-x64', 'win-arm64', 'AnyCPU']
+    env:
+      output: ${{ format ('{0}\bin\Release\net10.0{1}', github.workspace, matrix.runtimeIdentifier != 'AnyCPU' && format ('\{0}\publish', matrix.runtimeIdentifier) || '') }}
+      releasePath: ${{ format ('{0}\{1}.zip', github.workspace, matrix.runtimeIdentifier) }}
+
+    steps:
+    - uses: actions/checkout@main
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@main
+      with:
+        dotnet-version: 10.x
+
+    - name: 'Build (AnyCPU)'
+      if: ${{ matrix.runtimeIdentifier == 'AnyCPU' }}
+      run: |
+          dotnet msbuild EdgeDownloader.csproj /m /t:Restore,Build /p:Configuration=Release
+
+    - name: ${{ format ('Build ({0})', matrix.runtimeIdentifier) }}
+      if: ${{ matrix.runtimeIdentifier != 'AnyCPU' }}
+      run: |
+          dotnet publish EdgeDownloader.csproj /m /t:Restore,Build /p:RuntimeIdentifier=${{ matrix.runtimeIdentifier }}
+
+    - name: 'Upload artifact'
+      uses: actions/upload-artifact@main
+      with:
+        name: ${{ matrix.runtimeIdentifier }}
+        path: ${{ env.output }}
+        compression-level: 9
+
+    - name: 'Prepare Release'
+      if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+      run: |
+          Compress-Archive -Path ${{ env.output }}\* -DestinationPath ${{ env.releasePath }} 
+
+    - name: 'Create a Release'
+      if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+      uses: ncipollo/release-action@main
+      with:
+        allowUpdates	: true
+        tag: ${{ github.ref_name }}
+        artifacts: ${{ env.releasePath }}
